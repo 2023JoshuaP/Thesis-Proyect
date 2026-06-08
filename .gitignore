@@ -1,0 +1,8 @@
+dataset_cut_faces/
+dataset_uta_roi/
+dataset_faces/
+dataset_roi/
+dataset_images/
+NITYMED/
+UTA-RLDD/
+.venv
