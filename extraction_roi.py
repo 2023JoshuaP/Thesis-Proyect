@@ -9,12 +9,11 @@ def extraction_roi():
 
     detector = MTCNN()
 
-    limit_per_folder = 20
     path_images = []
 
     for subfolder in input_folder.glob("*/*"):
         if subfolder.is_dir():
-            sample_images = list(subfolder.glob("*.jpg"))[:limit_per_folder]
+            sample_images = list(subfolder.glob("*.jpg"))
             path_images.extend(sample_images)
 
     if not path_images:
