@@ -8,3 +8,4 @@ UTA-RLDD/
 download_videos.py
 .venv
 logs.txt
+data/
