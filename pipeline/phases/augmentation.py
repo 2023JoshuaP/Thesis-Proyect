@@ -12,18 +12,27 @@ RANDOM_SEED = 42
 
 AUGMENTATIONS_PER_IMAGE = 2  # x3 total (1 original + 2 aumentadas)
 
+"""
+Rotar entre -15 y +15 grados
+"""
 def _augment_rotation(image: np.ndarray) -> np.ndarray:
     angle = random.uniform(-15, 15)
     h, w  = image.shape[:2]
     M     = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
     return cv2.warpAffine(image, M, (w, h))
 
+"""
+Ajustar brillo multiplicando el canal V en HSV por un factor entre 0.6 y 1.4
+"""
 def _augment_brightness(image: np.ndarray) -> np.ndarray:
     factor = random.uniform(0.6, 1.4)
-    hsv    = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
     hsv[:, :, 2] = np.clip(hsv[:, :, 2] * factor, 0, 255)
     return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
+"""
+Escalar entre 85% y 115% manteniendo el tamaño original (recortando o rellenando)
+"""
 def _augment_scale(image: np.ndarray) -> np.ndarray:
     factor = random.uniform(0.85, 1.15)
     h, w   = image.shape[:2]
@@ -42,6 +51,9 @@ def _augment_scale(image: np.ndarray) -> np.ndarray:
     return canvas
 
 # Flip horizontal
+"""
+Voltear horizontalmente (efecto espejo) para simular la variabilidad natural de las posiciones de la cabeza y la dirección de la mirada.
+"""
 def _augment_flip(image: np.ndarray) -> np.ndarray:
     return cv2.flip(image, 1)  # 1 = flip horizontal (efecto espejo)
 
@@ -143,5 +155,5 @@ if __name__ == "__main__":
 
     split_and_augment(
         input_folder  = base / "data" / "processed" / "nitymed_roi",
-        output_folder = base / "data" / "processed" / "nitymed_dataset"
+        output_folder = base / "data" / "processed" / "nitymed_augmented"
     )
