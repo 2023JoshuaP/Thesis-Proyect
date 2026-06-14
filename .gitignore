@@ -12,3 +12,4 @@ data/
 output/
 output_yawn/
 models/
+*.txt
