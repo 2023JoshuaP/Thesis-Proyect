@@ -9,3 +9,6 @@ download_videos.py
 .venv
 logs.txt
 data/
+output/
+output_yawn/
+models/
