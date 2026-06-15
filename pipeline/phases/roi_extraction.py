@@ -222,32 +222,88 @@ def process_video(video_path: Path, output_dir: Path, mtcnn_detector, face_landm
         base_name = f"{video_name}_f{meta['frame_index']:06d}.jpg"
         cv2.imwrite(str(class_dir / f"eyes_{base_name}"), eye_roi)
         cv2.imwrite(str(class_dir / f"mouth_{base_name}"), mouth_roi)
+        
+        counts[label] += 1
     
     return counts
 
-def main(videos_dir: Path, output_dir: Path, model_path: Path):
-    mtcnn_detector = MTCNN()
+import concurrent.futures
+import multiprocessing as mp_core
 
-    base_options = mp_python.BaseOptions(model_asset_path=str(model_path))
+# Globals for the worker process
+_mtcnn_detector = None
+_face_landmarker = None
+
+def init_worker(model_asset_path):
+    import tensorflow as tf
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(e)
+            
+    global _mtcnn_detector
+    global _face_landmarker
+    
+    from mtcnn import MTCNN
+    import mediapipe as mp
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision
+    
+    _mtcnn_detector = MTCNN()
+    base_options = mp_python.BaseOptions(
+        model_asset_path=str(model_asset_path),
+        delegate=mp_python.BaseOptions.Delegate.GPU
+    )
     options = vision.FaceLandmarkerOptions(
         base_options=base_options,
         running_mode=vision.RunningMode.IMAGE,
         num_faces=1,
         min_face_detection_confidence=0.5
     )
-    face_landmarker = vision.FaceLandmarker.create_from_options(options)
+    _face_landmarker = vision.FaceLandmarker.create_from_options(options)
 
+def process_video_worker(args):
+    video_path, output_dir = args
+    global _mtcnn_detector, _face_landmarker
+    return video_path.name, process_video(video_path, output_dir, _mtcnn_detector, _face_landmarker)
+
+def main(videos_dir: Path, output_dir: Path, model_path: Path):
+    MAX_VIDEOS = None  # Procesar todos los videos restantes
+    START_INDEX = 65   # Iniciamos desde el video 66, ya que procesamos los primeros 65 (15 + 20 + 30)
+    
     video_files = sorted(videos_dir.rglob("*.mp4"))
-    print(f"Encontrados {len(video_files)} videos...")
+    
+    # Cortar la lista para saltarnos los que ya procesamos hoy
+    video_files = video_files[START_INDEX:]
+    
+    if MAX_VIDEOS:
+        video_files = video_files[:MAX_VIDEOS]
+        print(f"Procesando {MAX_VIDEOS} videos a partir del índice {START_INDEX}...")
+    else:
+        print(f"Procesando los {len(video_files)} videos restantes a partir del índice {START_INDEX}...")
 
     total = {c: 0 for c in CLASSES}
-    for video_path in tqdm(video_files, desc="Procesando videos"):
-        counts = process_video(video_path, output_dir, mtcnn_detector, face_landmarker)
-        for c in CLASSES:
-            total[c] += counts[c]
-        tqdm.write(f"{video_path.name}: {counts}")
     
-    face_landmarker.close()
+    args_list = [(v, output_dir) for v in video_files]
+    
+    # Usar 'spawn' para evitar problemas con CUDA y TF al crear subprocesos
+    ctx = mp_core.get_context('spawn')
+    
+    # 3 workers es seguro para no colapsar los 6GB de VRAM
+    with concurrent.futures.ProcessPoolExecutor(max_workers=3, mp_context=ctx, initializer=init_worker, initargs=(model_path,)) as executor:
+        futures = {executor.submit(process_video_worker, args): args for args in args_list}
+        
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(video_files), desc="Procesando videos paralelos"):
+            try:
+                name, counts = future.result()
+                for c in CLASSES:
+                    total[c] += counts[c]
+                tqdm.write(f"{name}: {counts}")
+            except Exception as exc:
+                tqdm.write(f"{futures[future][0].name} generó una excepción: {exc}")
 
     print("\nResumen total:")
     for c in CLASSES:
@@ -257,7 +313,7 @@ if __name__ == "__main__":
     base = Path(__file__).parent.parent.parent
 
     main(
-        videos_dir = base / "data" / "raw" / "NYTIMED_videos",
+        videos_dir = base / "data" / "raw" / "NITYMED_videos" / "Yawning",
         output_dir = base / "data" / "processed" / "nitymed_frames",
         model_path = base / "models" / "face_landmarker.task"
     )
