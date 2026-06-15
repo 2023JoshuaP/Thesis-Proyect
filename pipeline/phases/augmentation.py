@@ -10,7 +10,7 @@ VAL_RATIO   = 0.15
 TEST_RATIO  = 0.15
 RANDOM_SEED = 42
 
-AUGMENTATIONS_PER_IMAGE = 2  # x3 total (1 original + 2 aumentadas)
+TARGET_CLASS_SIZE = 5000  # Máximo de pares por clase
 
 def _augment_rotation(image: np.ndarray) -> np.ndarray:
     angle = random.uniform(-15, 15)
@@ -75,12 +75,9 @@ def split_and_augment(input_folder: Path, output_folder: Path):
 
         # Agrupar por nombre base → { "frame001.jpg": [eyes_frame001.jpg, mouth_frame001.jpg] }
         pairs: dict[str, list[Path]] = {}
-        for gender_dir in class_dir.iterdir():
-            if not gender_dir.is_dir():
-                continue
-            for img_path in gender_dir.glob("*.jpg"):
-                base = _get_base_name(img_path)
-                pairs.setdefault(base, []).append(img_path)
+        for img_path in class_dir.glob("*.jpg"):
+            base = _get_base_name(img_path)
+            pairs.setdefault(base, []).append(img_path)
 
         # Solo pares completos (tienen eyes_ Y mouth_)
         complete_pairs = {k: v for k, v in pairs.items() if len(v) == 2}
@@ -102,6 +99,11 @@ def split_and_augment(input_folder: Path, output_folder: Path):
         random.seed(RANDOM_SEED)
 
         base_names = list(pairs.keys())
+        
+        # ── Fase 1: Undersampling ──
+        if len(base_names) > TARGET_CLASS_SIZE:
+            base_names = random.sample(base_names, TARGET_CLASS_SIZE)
+            print(f"[{class_name}] Undersampling aplicado: reducido de {len(pairs)} a {TARGET_CLASS_SIZE} pares.")
 
         # Dividir por nombre base → el par siempre va junto
         train_bases, temp_bases = train_test_split(
@@ -128,24 +130,33 @@ def split_and_augment(input_folder: Path, output_folder: Path):
             # Aumento solo en train — se aumenta el par completo con la misma transformación
             aug_count = 0
             if split_name == "train":
-                for base_name in split_bases:
-                    pair_imgs = pairs[base_name]
-                    for i in range(AUGMENTATIONS_PER_IMAGE):
-                        # Misma semilla para el par → misma transformación aplicada a ojos y boca
-                        seed_i = RANDOM_SEED + hash(base_name) + i
-                        random.seed(seed_i)
-                        transforms = random.sample(AUGMENT_POOL, k=random.randint(1, 2))
-
-                        for img_path in pair_imgs:
-                            image = cv2.imread(str(img_path))
-                            if image is None:
-                                continue
-                            augmented = image.copy()
-                            for t in transforms:
-                                augmented = t(augmented)
-                            aug_name = f"aug{i+1}_{img_path.name}"
-                            cv2.imwrite(str(dest_dir / aug_name), augmented)
-                            aug_count += 1
+                import math
+                train_target = int(TARGET_CLASS_SIZE * TRAIN_RATIO)
+                current_train = len(split_bases)
+                
+                aug_per_image = 0
+                if current_train < train_target:
+                    aug_per_image = math.ceil((train_target - current_train) / current_train)
+                
+                if aug_per_image > 0:
+                    for base_name in split_bases:
+                        pair_imgs = pairs[base_name]
+                        for i in range(aug_per_image):
+                            # Misma semilla para el par → misma transformación aplicada a ojos y boca
+                            seed_i = RANDOM_SEED + hash(base_name) + i
+                            random.seed(seed_i)
+                            transforms = random.sample(AUGMENT_POOL, k=random.randint(1, 2))
+    
+                            for img_path in pair_imgs:
+                                image = cv2.imread(str(img_path))
+                                if image is None:
+                                    continue
+                                augmented = image.copy()
+                                for t in transforms:
+                                    augmented = t(augmented)
+                                aug_name = f"aug{i+1}_{img_path.name}"
+                                cv2.imwrite(str(dest_dir / aug_name), augmented)
+                                aug_count += 1
 
             if split_name == "train":
                 total_train += len(split_bases)
@@ -156,7 +167,7 @@ def split_and_augment(input_folder: Path, output_folder: Path):
                 total_test += len(split_bases)
 
         print(f"\n[{class_name}]")
-        print(f"  Train: {len(train_bases):4d} pares originales + {len(train_bases) * AUGMENTATIONS_PER_IMAGE * 2} imágenes aumentadas")
+        print(f"  Train: {len(train_bases):4d} pares originales + {aug_count} imágenes aumentadas")
         print(f"  Val:   {len(val_bases):4d} pares")
         print(f"  Test:  {len(test_bases):4d} pares")
 
@@ -170,6 +181,6 @@ if __name__ == "__main__":
     base = Path(__file__).parent.parent.parent
 
     split_and_augment(
-        input_folder  = base / "data" / "processed" / "nitymed_roi",
+        input_folder  = base / "data" / "processed" / "nitymed_frames",
         output_folder = base / "data" / "processed" / "nitymed_augmented"
     )
