@@ -8,11 +8,11 @@ from tensorflow.keras.applications.resnet_v2 import preprocess_input
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 # ── Configuración ────────────────────────────────────────────────────────────
-IMG_SIZE    = (224, 224)
-BATCH_SIZE  = 8
-EPOCHS      = 30
-NUM_CLASSES = 2
-CLASSES     = ["bostezo", "microsueno"]
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 8
+EPOCHS = 30
+NUM_CLASSES = 3
+CLASSES = ["alerta", "bostezo", "microsueno"]
 RANDOM_SEED = 42
 
 # ── Dataloader ───────────────────────────────────────────────────────────────
@@ -52,11 +52,11 @@ def _build_dataset(split_dir: Path, shuffle: bool = False):
         pairs: dict[str, dict] = {}
         for img_path in class_dir.glob("*.jpg"):
             name = img_path.name
-            if name.startswith("eyes_"):
-                base = name[len("eyes_"):]
+            if "eyes_" in name:
+                base = name.replace("eyes_", "")
                 pairs.setdefault(base, {})["eyes"] = img_path
-            elif name.startswith("mouth_"):
-                base = name[len("mouth_"):]
+            elif "mouth_" in name:
+                base = name.replace("mouth_", "")
                 pairs.setdefault(base, {})["mouth"] = img_path
 
         complete = {k: v for k, v in pairs.items() if "eyes" in v and "mouth" in v}
@@ -91,14 +91,12 @@ El renombrado explícito de capas (eyes_*, mouth_*) evita conflictos
 de nombres entre las dos ramas al compartir la misma arquitectura base.
 """
 def _build_model() -> Model:
-    base_eyes = ResNet50V2(include_top=False, weights="imagenet", pooling="avg")
-    base_eyes._name = "resnet_eyes"
+    base_eyes = ResNet50V2(include_top=False, weights="imagenet", pooling="avg", name="resnet_eyes")
     for layer in base_eyes.layers:
         layer._name = f"eyes_{layer.name}"
         layer.trainable = False
 
-    base_mouth = ResNet50V2(include_top=False, weights="imagenet", pooling="avg")
-    base_mouth._name = "resnet_mouth"
+    base_mouth = ResNet50V2(include_top=False, weights="imagenet", pooling="avg", name="resnet_mouth")
     for layer in base_mouth.layers:
         layer._name = f"mouth_{layer.name}"
         layer.trainable = False
@@ -175,7 +173,7 @@ def train(dataset_dir: Path, output_dir: Path):
 
     callbacks = [
         EarlyStopping(patience=5, restore_best_weights=True, verbose=1),
-        SaveBestModel(filepath=str(output_dir / "best_model_weights.h5")),
+        SaveBestModel(filepath=str(output_dir / "best_model_weights.weights.h5")),
         ReduceLROnPlateau(factor=0.5, patience=3, verbose=1)
     ]
 
@@ -202,7 +200,7 @@ def train(dataset_dir: Path, output_dir: Path):
     print(f"F1 Score (weighted): {f1:.4f}")
 
     # Guardar solo pesos del modelo final
-    model.save_weights(str(output_dir / "final_model_weights.h5"))
+    model.save_weights(str(output_dir / "final_model_weights.weights.h5"))
     print(f"\nPesos guardados en: {output_dir}")
 
 
