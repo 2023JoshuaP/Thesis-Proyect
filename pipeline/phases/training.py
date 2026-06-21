@@ -1,3 +1,8 @@
+"""
+Arquitectura de Red Neuronal Convolucional 
+Dual-Stream (Flujo Dual) utilizando ResNet50V2 como backbone, orquestando 
+todo el proceso de carga, entrenamiento y evaluación métrica.
+"""
 import numpy as np
 from pathlib import Path
 from sklearn.metrics import classification_report, f1_score
@@ -8,20 +13,19 @@ from tensorflow.keras.applications.resnet_v2 import preprocess_input
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 # ── Configuración ────────────────────────────────────────────────────────────
-IMG_SIZE = (224, 224)
-BATCH_SIZE = 8
-EPOCHS = 30
+IMG_SIZE    = (224, 224)
+BATCH_SIZE  = 8
+EPOCHS      = 30
 NUM_CLASSES = 3
-CLASSES = ["alerta", "bostezo", "microsueno"]
+CLASSES     = ["alerta", "bostezo", "microsueno"]
 RANDOM_SEED = 42
 
 # ── Dataloader ───────────────────────────────────────────────────────────────
 """
 Carga y preprocesa un par de imágenes (ojos + boca) junto con su etiqueta.
-Para cada imagen: lee el archivo, lo decodifica a tensor RGB,
-lo redimensiona a 224x224 (requerido por ResNet50V2) y aplica preprocess_input
-que normaliza los píxeles al rango esperado por ImageNet.
-Retorna la tupla ((img_ojos, img_boca), label).
+Aplica `preprocess_input` de Keras, el cual cumple con la Normalización 
+de Imágenes descrita en el marco teórico (escalado a rango [-1, 1]) 
+para garantizar la compatibilidad con los pesos de ImageNet.
 """
 def _load_pair(eyes_path: str, mouth_path: str, label: int):
     def _load_img(path):
@@ -81,14 +85,14 @@ def _build_dataset(split_dir: Path, shuffle: bool = False):
 
 # ── Modelo ───────────────────────────────────────────────────────────────────
 """
-Construye la arquitectura dual-stream para la clasificación.
-Instancia dos redes independientes (una para ojos, otra para boca),
-ambas congeladas inicialmente (trainable=False) usando pesos preentrenados de ImageNet.
-Cada rama extrae un vector de features mediante Global Average Pooling.
-Esos dos vectores se concatenan y pasan por dos capas Dense con Dropout
-antes del clasificador softmax de 2 clases (bostezo, microsueño).
-El renombrado explícito de capas (eyes_*, mouth_*) evita conflictos
-de nombres entre las dos ramas al compartir la misma arquitectura base.
+Construye la arquitectura propuesta en la tesis (Flujo Dual):
+1. Instancia dos backbones independientes de ResNet50V2 (ojos y boca).
+2. Usa Transfer Learning congelando pesos de ImageNet.
+3. Extrae características espaciales mediante Global Average Pooling (GAP).
+4. Realiza una "Fusión Tardía" (Late Fusion) concatenando los vectores.
+5. Inyecta regularización (Dropout del 40% y 30%) en capas densas para
+   evitar el sobreajuste.
+6. Clasificador Softmax final para 3 clases.
 """
 def _build_model() -> Model:
     base_eyes = ResNet50V2(include_top=False, weights="imagenet", pooling="avg", name="resnet_eyes")
@@ -139,17 +143,10 @@ class SaveBestModel(tf.keras.callbacks.Callback):
 
 # ── Entrenamiento ─────────────────────────────────────────────────────────────
 """
-Función principal de orquestación del entrenamiento.
-Carga los tres splits (train, val, test), construye y compila el modelo
-con Adam (lr=1e-3) y sparse categorical crossentropy.
-Entrena con tres callbacks:
-    - EarlyStopping: detiene si val_loss no mejora en 5 épocas y restaura mejores pesos.
-    - SaveBestModel: persiste en disco los mejores pesos ante un posible crash.
-    - ReduceLROnPlateau: reduce el learning rate a la mitad si val_loss
-    no mejora en 3 épocas consecutivas.
-Al finalizar, evalúa en test generando predicciones batch a batch para
-calcular el classification_report y F1 weighted. Guarda también
-los pesos del último epoch como referencia.
+Orquesta el entrenamiento y la evaluación. Mide el desempeño del modelo 
+utilizando Precisión, Exhaustividad (Recall) y puntuación F1-Score 
+(weighted) evaluadas sobre el conjunto de prueba, tal cual se define 
+en los objetivos de la propuesta.
 """
 def train(dataset_dir: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
