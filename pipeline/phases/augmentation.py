@@ -1,3 +1,9 @@
+"""
+Este script se encarga de mitigar el desbalance de clases presente en el 
+dataset NITYMED aplicando técnicas de Data Augmentation a las clases 
+minoritarias (Bostezo y Microsueño), tras haber dividido el dataset de forma 
+estratificada en Train, Validation y Test.
+"""
 import cv2
 import numpy as np
 from pathlib import Path
@@ -63,9 +69,12 @@ def _get_base_name(img_path: Path) -> str:
 
 def split_and_augment(input_folder: Path, output_folder: Path):
     """
-    1. Agrupa imágenes por nombre base (par eyes_ + mouth_ juntos)
-    2. Divide pares en train/val/test estratificado (70/15/15)
-    3. Aplica aumento solo al train (x3), manteniendo el par siempre junto
+    MITIGACIÓN DE DESBALANCE Y ESTRATIFICACIÓN
+    1. Agrupa imágenes por nombre base (par eyes_ + mouth_ juntos).
+    2. Divide pares en train/val/test de forma estratificada (70/15/15).
+    3. Aplica aumento de datos (Data Augmentation) solo al conjunto de Train
+       para las clases minoritarias, manteniendo el par de ROIs siempre con 
+       la misma transformación (misma semilla).
     """
     class_images: dict[str, dict[str, list[Path]]] = {}
 
