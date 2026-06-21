@@ -1,7 +1,8 @@
 """
-Procesamiento del dataset de videos NITYMED para poder generar los ROIS
-correspondientes etiquetandolos a nivel de FRAME para 3 clases: alerta,
-bostezo y microsueño.
+Procesamiento del dataset de videos NITYMED para generar las Regiones de
+Interés (ROIs) correspondientes a ojos y boca, etiquetándolas a nivel de
+FRAME para 3 clases: alerta, bostezo y microsueño, mediante el uso de 
+MTCNN, MediaPipe, EAR y MAR.
 """
 
 from __future__ import annotations
@@ -56,10 +57,11 @@ def _eucledian(p1, p2) -> float:
 
 def _eye_aspect_ratio(landmarks_px, eye_indices) -> float:
     """
-    Calcula el EAR (EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||))
+    Calculo del Eye Aspect Ratio para medir el nivel de apertura ocular.
+    (EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||))
     p1, p4: puntos horizontales del ojo
     p2, p3, p5, p6: puntos verticales del ojo
-    Valores bajos de EAR indican que el ojo esta cerrado (-<0.2)
+    Umbral clave: EAR < 0.15 indica posible microsueño.
     """
     p = [landmarks_px[i] for i in eye_indices]
     vertical_1 = _eucledian(p[1], p[5])
@@ -69,10 +71,11 @@ def _eye_aspect_ratio(landmarks_px, eye_indices) -> float:
 
 def _mouth_aspect_ratio(landmarks_pixel, mouth_index) -> float:
     """
-    Calcula el MAR (MAR = ||p2-p4|| / (2 * ||p1-p3||))
+    Calculo del Mouth Aspect Ratio para medir el nivel de apertura bucal.
+    (MAR = ||p2-p4|| / (2 * ||p1-p3||))
     p1, p3: puntos horizontales de la boca
     p2, p4: puntos verticales de la boca
-    Valores altos de MAR indican que la boca esta abierta (>0.6)
+    Umbral clave: MAR > 0.60 mantenido en el tiempo indica bostezo.
     """
     left_corner, right_corner, upper_lip, lower_lip = [landmarks_pixel[i] for i in mouth_index]
     vertical = _eucledian(upper_lip, lower_lip)
@@ -80,7 +83,10 @@ def _mouth_aspect_ratio(landmarks_pixel, mouth_index) -> float:
     return vertical / horizontal
 
 """
-Deteccion del rostro mediante MTCNN junto con los landmarks de MediaPipe
+DETECCIÓN FACIAL (MTCNN) Y LANDMARKS (MediaPipe)
+Esta función recibe un frame, utiliza MTCNN para localizar el rostro
+de forma robusta, y luego aplica MediaPipe Face Mesh sobre el rostro 
+recortado para obtener las coordenadas 3D de los puntos faciales.
 """
 def _detect_face_and_landmarks(frame_bgr, mtcnn_detector, face_landmarker):
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -114,10 +120,10 @@ def _detect_face_and_landmarks(frame_bgr, mtcnn_detector, face_landmarker):
     return face_crop, landmarks_pixel
 
 """
-Extrae los ROIS de ojos y boca
-Calcula el boundind box de los landmarks, agrega un margen
-proporcional al ancho/alto de ese bounding box y recorta la
-region del rostro correspondiente a ese margen
+EXTRACCIÓN DE REGIONES DE INTERÉS (ROI) DE OJOS Y BOCA
+Calcula el bounding box a partir de los puntos de referencia faciales,
+añade un margen de tolerancia (padding) y extrae de la imagen original
+exclusivamente la región anatómica relevante, eliminando ruido de fondo.
 """
 def _extract_rois(face_crop, landmarks_pixel, region_index, margin_ratio):
     points = np.array([landmarks_pixel[i] for i in region_index])
@@ -135,8 +141,10 @@ def _extract_rois(face_crop, landmarks_pixel, region_index, margin_ratio):
     return face_crop[y1:y2, x1:x2]
 
 """
-Procesado de etiquetado a cada frame del video a
-partir de la secuencia completa de EAR/MAR
+ETIQUETADO AUTOMÁTICO (CLASIFICACIÓN MULTICLASE)
+Asigna de forma automática la etiqueta (alerta, bostezo o microsueño) 
+a cada frame del video evaluando la secuencia temporal de EAR y MAR.
+Evita la necesidad de anotación manual del dataset.
 """
 def _assing_labels(metadata: list[dict]) -> list[str]:
     n = len(metadata)
@@ -271,12 +279,11 @@ def process_video_worker(args):
     return video_path.name, process_video(video_path, output_dir, _mtcnn_detector, _face_landmarker)
 
 def main(videos_dir: Path, output_dir: Path, model_path: Path):
-    MAX_VIDEOS = None  # Procesar todos los videos restantes
-    START_INDEX = 65   # Iniciamos desde el video 66, ya que procesamos los primeros 65 (15 + 20 + 30)
+    MAX_VIDEOS = None
+    START_INDEX = 65
     
     video_files = sorted(videos_dir.rglob("*.mp4"))
     
-    # Cortar la lista para saltarnos los que ya procesamos hoy
     video_files = video_files[START_INDEX:]
     
     if MAX_VIDEOS:
@@ -292,7 +299,6 @@ def main(videos_dir: Path, output_dir: Path, model_path: Path):
     # Usar 'spawn' para evitar problemas con CUDA y TF al crear subprocesos
     ctx = mp_core.get_context('spawn')
     
-    # 3 workers es seguro para no colapsar los 6GB de VRAM
     with concurrent.futures.ProcessPoolExecutor(max_workers=3, mp_context=ctx, initializer=init_worker, initargs=(model_path,)) as executor:
         futures = {executor.submit(process_video_worker, args): args for args in args_list}
         
