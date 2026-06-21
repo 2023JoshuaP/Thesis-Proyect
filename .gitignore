@@ -13,3 +13,8 @@ output/
 output_yawn/
 models/
 *.txt
+pipeline/notebooks/augmentation.py
+pipeline/notebooks/inference (1).py
+pipeline/notebooks/inference_test.py
+pipeline/notebooks/roi_extraction.py
+pipeline/notebooks/training.py
